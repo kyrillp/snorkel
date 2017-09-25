@@ -6,9 +6,10 @@ from utils import SymbolTable
 
 class TextRNN(RNNBase):
     """TextRNN for strings of text."""
+
     def _preprocess_data(self, candidates, extend=False):
         """Convert candidate sentences to lookup sequences
-        
+
         :param candidates: candidates to process
         :param extend: extend symbol table for tokens (train), or lookup (test)?
         """

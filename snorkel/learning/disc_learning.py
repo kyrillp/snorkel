@@ -7,17 +7,19 @@ from six.moves.cPickle import dump, load
 from .classifier import Classifier
 from .utils import reshape_marginals, LabelBalancer
 
+
 class TFNoiseAwareModel(Classifier):
     """
     Generic NoiseAwareModel class for TensorFlow models.
     Note that the actual network is built when train is called (to allow for
     model architectures which depend on the training data, e.g. vocab size).
-    
+
     :param n_threads: Parallelism to use; single-threaded if None
     :param seed: Top level seed which is passed into both numpy operations
         via a RandomState maintained by the class, and into TF as a graph-level
         seed.
     """
+
     def __init__(self, n_threads=None, seed=123, **kwargs):
         self.n_threads = n_threads
         self.seed = seed
@@ -35,8 +37,8 @@ class TFNoiseAwareModel(Classifier):
         Additional ops must be set depending on whether the default
         self._construct_feed_dict method below is used, or a custom one.
 
-        Note that _build_model is called in the train method, allowing for the 
-        network to be constructed dynamically depending on the training set 
+        Note that _build_model is called in the train method, allowing for the
+        network to be constructed dynamically depending on the training set
         (e.g., the size of the vocabulary for a text LSTM model)
 
         Note also that model_kwargs are saved to disk by the self.save method,
@@ -48,7 +50,7 @@ class TFNoiseAwareModel(Classifier):
 
     def _build_training_ops(self, **training_kwargs):
         """
-        Builds the TensorFlow Operations for the training procedure. Must set 
+        Builds the TensorFlow Operations for the training procedure. Must set
         the following:
             - self.loss: Loss function
             - self.optimizer: Training operation
@@ -59,7 +61,7 @@ class TFNoiseAwareModel(Classifier):
         else:
             loss_fn = tf.nn.sigmoid_cross_entropy_with_logits
         self.loss = tf.reduce_mean(loss_fn(logits=self.logits, labels=self.Y))
-        
+
         # Build training op
         self.lr = tf.placeholder(tf.float32)
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
@@ -105,15 +107,15 @@ class TFNoiseAwareModel(Classifier):
         """Checks correctness of input; optional to implement."""
         pass
 
-    def train(self, X_train, Y_train, n_epochs=25, lr=0.01, batch_size=256, 
-        rebalance=False, X_dev=None, Y_dev=None, print_freq=5, dev_ckpt=True,
-        dev_ckpt_delay=0.75, save_dir='checkpoints', **kwargs):
+    def train(self, X_train, Y_train, n_epochs=25, lr=0.01, batch_size=256,
+              rebalance=False, X_dev=None, Y_dev=None, print_freq=5, dev_ckpt=True,
+              dev_ckpt_delay=0.75, save_dir='checkpoints', **kwargs):
         """
         Generic training procedure for TF model
 
         :param X_train: The training Candidates. If self.representation is True, then
             this is a list of Candidate objects; else is a csr_AnnotationMatrix
-            with rows corresponding to training candidates and columns 
+            with rows corresponding to training candidates and columns
             corresponding to features.
         :param Y_train: Array of marginal probabilities for each Candidate
         :param n_epochs: Number of training epochs
@@ -132,9 +134,9 @@ class TFNoiseAwareModel(Classifier):
         :param dev_ckpt_delay: Start dev checkpointing after this portion
             of n_epochs.
         :param save_dir: Save dir path for checkpointing.
-        :param kwargs: All hyperparameters that change how the graph is built 
+        :param kwargs: All hyperparameters that change how the graph is built
             must be passed through here to be saved and reloaded to save /
-            reload model. *NOTE: If a parameter needed to build the 
+            reload model. *NOTE: If a parameter needed to build the
             network and/or is needed at test time is not included here, the
             model will not be able to be reloaded!*
         """
@@ -150,33 +152,36 @@ class TFNoiseAwareModel(Classifier):
             kwargs['d'] = X_train.shape[1]
 
         # Check that the cardinality of the training marginals and model agree
-        cardinality = Y_train.shape[1] if len(Y_train.shape) > 1 else 2
-        if cardinality != self.cardinality:
-            raise ValueError("Training marginals cardinality ({0}) does not"
-                "match model cardinality ({1}).".format(Y_train.shape[1], 
-                    self.cardinality))
-        # Make sure marginals are in correct default format
-        Y_train = reshape_marginals(Y_train)
-        # Make sure marginals are in [0,1] (v.s e.g. [-1, 1])
-        if self.cardinality > 2 and not np.all(Y_train.sum(axis=1) - 1 < 1e-10):
-            raise ValueError("Y_train must be row-stochastic (rows sum to 1).")
-        if not np.all(Y_train >= 0):
-            raise ValueError("Y_train must have values in [0,1].")
 
-        # Remove unlabeled examples (i.e. P(X=k) == 1 / cardinality for all k)
-        # and optionally rebalance training set
-        # Note: rebalancing only for binary setting currently
-        if self.cardinality == 2:
-            # This removes unlabeled examples and optionally rebalances
-            train_idxs = LabelBalancer(Y_train).get_train_idxs(rebalance,
-                rand_state=self.rand_state)
-        else:
-            # In categorical setting, just remove unlabeled
-            diffs = Y_train.max(axis=1) - Y_train.min(axis=1)
-            train_idxs = np.where(diffs > 1e-6)[0]
-        X_train = [X_train[j] for j in train_idxs] if self.representation \
-            else X_train[train_idxs, :]
-        Y_train = Y_train[train_idxs]
+        # cardinality = Y_train.shape[1] if len(Y_train.shape) > 1 else 2
+        # if cardinality != self.cardinality:
+        #     raise ValueError("Training marginals cardinality ({0}) does not"
+        #                      "match model cardinality ({1}).".format(Y_train.shape[1],
+        #                                                              self.cardinality))
+
+        # Make sure marginals are in correct default format
+        # Y_train = reshape_marginals(Y_train)
+        # # Make sure marginals are in [0,1] (v.s e.g. [-1, 1])
+        # if self.cardinality > 2 and not np.all(Y_train.sum(axis=1) - 1 < 1e-10):
+        #     raise ValueError("Y_train must be row-stochastic (rows sum to 1).")
+        # if not np.all(Y_train >= 0):
+        #     raise ValueError("Y_train must have values in [0,1].")
+
+        # # Remove unlabeled examples (i.e. P(X=k) == 1 / cardinality for all k)
+        # # and optionally rebalance training set
+        # # Note: rebalancing only for binary setting currently
+        # if self.cardinality == 2:
+        #     # This removes unlabeled examples and optionally rebalances
+        #     train_idxs = LabelBalancer(Y_train).get_train_idxs(rebalance,
+        #                                                        rand_state=self.rand_state)
+        # else:
+        #     # In categorical setting, just remove unlabeled
+        #     diffs = Y_train.max(axis=1) - Y_train.min(axis=1)
+        #     train_idxs = np.where(diffs > 1e-6)[0]
+
+        # X_train = [X_train[j] for j in train_idxs] if self.representation \
+        #     else X_train[train_idxs, :]
+        # Y_train = Y_train[train_idxs]
 
         # Create new graph, build network, and start session
         self._build_new_graph_session(**kwargs)
@@ -186,7 +191,7 @@ class TFNoiseAwareModel(Classifier):
         # would be separated but no negative effect
         with self.graph.as_default():
             self._build_training_ops(**kwargs)
-        
+
         # Initialize variables
         with self.graph.as_default():
             self.session.run(tf.global_variables_initializer())
@@ -205,12 +210,12 @@ class TFNoiseAwareModel(Classifier):
             epoch_losses = []
             for i in range(0, n, batch_size):
                 feed_dict = self._construct_feed_dict(
-                    X_train[i:min(n, i+batch_size)],
-                    Y_train[i:min(n, i+batch_size)],
+                    X_train[i:min(n, i + batch_size)],
+                    Y_train[i:min(n, i + batch_size)],
                     lr=lr,
                     **kwargs
                 )
-                # Run training step and evaluate loss function    
+                # Run training step and evaluate loss function
                 epoch_loss, _ = self.session.run(
                     [self.loss, self.optimizer], feed_dict=feed_dict)
                 epoch_losses.append(epoch_loss)
@@ -221,28 +226,30 @@ class TFNoiseAwareModel(Classifier):
             X_train = [X_train[j] for j in train_idxs] if self.representation \
                 else X_train[train_idxs, :]
             Y_train = Y_train[train_idxs]
-            
+
             # Print training stats and optionally checkpoint model
-            if verbose and (t % print_freq == 0 or t in [0, (n_epochs-1)]):
+            if verbose and (t % print_freq == 0 or t in [0, (n_epochs - 1)]):
                 msg = "[{0}] Epoch {1} ({2:.2f}s)\tAverage loss={3:.6f}".format(
                     self.name, t, time() - st, np.mean(epoch_losses))
                 if X_dev is not None:
                     scores = self.score(X_dev, Y_dev, batch_size=batch_size)
                     score = scores if self.cardinality > 2 else scores[-1]
                     score_label = "Acc." if self.cardinality > 2 else "F1"
-                    msg += '\tDev {0}={1:.2f}'.format(score_label, 100. * score)
+                    msg += '\tDev {0}={1:.2f}'.format(
+                        score_label, 100. * score)
                 print(msg)
-                    
+
                 # If best score on dev set so far and dev checkpointing is
                 # active, save checkpoint
                 if X_dev is not None and dev_ckpt and \
-                    t > dev_ckpt_delay * n_epochs and score > dev_score_opt:
+                        t > dev_ckpt_delay * n_epochs and score > dev_score_opt:
                     dev_score_opt = score
                     self.save(save_dir=save_dir, global_step=t)
-        
+
         # Conclude training
         if verbose:
-            print("[{0}] Training done ({1:.2f}s)".format(self.name, time()-st))
+            print("[{0}] Training done ({1:.2f}s)".format(
+                self.name, time() - st))
 
         # If checkpointing on, load last checkpoint (i.e. best on dev set)
         if dev_ckpt and X_dev is not None and verbose and dev_score_opt > 0:
@@ -263,15 +270,15 @@ class TFNoiseAwareModel(Classifier):
             # Iterate over batches
             batch_marginals = []
             for b in range(0, N, batch_size):
-                batch = self._marginals_batch(X[b:b+batch_size])
+                batch = self._marginals_batch(X[b:b + batch_size])
                 # Note: Make sure a list is returned!
-                if min(b+batch_size, N) - b == 1:
+                if min(b + batch_size, N) - b == 1:
                     batch = np.array([batch])
                 batch_marginals.append(batch)
             return np.concatenate(batch_marginals)
 
     def save(self, model_name=None, save_dir='checkpoints', verbose=True,
-        global_step=0):
+             global_step=0):
         """Save current model."""
         model_name = model_name or self.name
 
@@ -305,7 +312,7 @@ class TFNoiseAwareModel(Classifier):
         # Load model kwargs needed to rebuild model
         with open(os.path.join(model_dir, "model_kwargs.pkl"), 'rb') as f:
             model_kwargs = load(f)
-        
+
         # Create new graph, build network, and start session
         self._build_new_graph_session(**model_kwargs)
 
