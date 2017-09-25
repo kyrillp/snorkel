@@ -113,25 +113,25 @@ class CRFTextRNN(RNNBase):
             self.logits, [-1, ntime_steps, self.cardinality])
         # self.marginals_op = tf.nn.softmax(self.logits)
 
-        # self.pred = tf.cast(tf.argmax(self.logits, axis=-1), tf.int32)
+        self.pred = tf.cast(tf.argmax(self.logits, axis=-1), tf.int32)
 
     def _build_training_ops(self, **training_kwargs):
 
-        batch_size = tf.shape(self.logits)[0]
-        seq_len = tf.shape(self.logits)[1]
-        self.Y = tf.cast(tf.argmax(self.Y, axis=2), tf.int32)
-        self.Y = tf.reshape(self.Y, [batch_size, seq_len])
-
-        log_likelihood, self.transition_params = tf.contrib.crf.crf_log_likelihood(
-            self.logits, self.Y, self.sentence_lengths)
-        self.loss = tf.reduce_mean(-log_likelihood)
+        # batch_size = tf.shape(self.logits)[0]
+        # seq_len = tf.shape(self.logits)[1]
+        # self.Y = tf.cast(tf.argmax(self.Y, axis=2), tf.int32)
+        # self.Y = tf.reshape(self.Y, [batch_size, seq_len])
+        #
+        # log_likelihood, self.transition_params = tf.contrib.crf.crf_log_likelihood(
+        #     self.logits, self.Y, self.sentence_lengths)
+        # self.loss = tf.reduce_mean(-log_likelihood)
 
         # self.pred, viterbi_score = tf.contrib.crf.viterbi_decode(
         #     self.logits, self.transition_params)
 
-        # losses = tf.nn.softmax_cross_entropy_with_logits(
-        #     logits=self.logits, labels=self.Y)
-        # self.loss = tf.reduce_mean(losses)
+        losses = tf.nn.softmax_cross_entropy_with_logits(
+            logits=self.logits, labels=self.Y)
+        self.loss = tf.reduce_mean(losses)
 
         # Build training op
         self.lr = tf.placeholder(tf.float32)
@@ -188,26 +188,26 @@ class CRFTextRNN(RNNBase):
 
         # Make tensor and run prediction op
         x, x_len, _ = self._make_tensor(X_test)
-        # pred = self.session.run(self.pred, {
-        #     self.sentences:        x,
-        #     self.sentence_lengths: x_len,
-        #     self.keep_prob:        1.0,
-        # })
-
-        logit_scores = self.session.run(self.logits, {
-            self.sentences: x,
+        pred = self.session.run(self.pred, {
+            self.sentences:        x,
             self.sentence_lengths: x_len,
-            self.keep_prob: 1.0
+            self.keep_prob:        1.0,
         })
 
-        preds = []
-        for logits in logit_scores:
-            pred_seq, viterbi_score = tf.contrib.crf.viterbi_decode(logits,
-                                                                    self.transition_params)
-            preds.append(pred_seq)
+        # logit_scores = self.session.run(self.logits, {
+        #     self.sentences: x,
+        #     self.sentence_lengths: x_len,
+        #     self.keep_prob: 1.0
+        # })
+        #
+        # preds = []
+        # for logits in logit_scores:
+        #     pred_seq, viterbi_score = tf.contrib.crf.viterbi_decode(logits,
+        #                                                             self.transition_params)
+        #     preds.append(pred_seq)
 
-        # return pred
-        return preds
+        return pred
+        # return preds
 
     def score(self, X_test, Y_test, b=0.5, set_unlabeled_as_neg=True, beta=1,
               batch_size=None):
