@@ -210,7 +210,7 @@ class CRFTextRNN(RNNBase):
         # return preds
 
     def score(self, X_test, Y_test, b=0.5, set_unlabeled_as_neg=True, beta=1,
-              batch_size=None):
+              batch_size=None, other_id=-1):
 
         # predictions, viterbi_score = self.predictions(X_test, b, batch_size)
         # pred_words = [self.word_dict.reverse()[i] for i in predictions]
@@ -250,6 +250,9 @@ class CRFTextRNN(RNNBase):
 
         token_err, sent_err = 0, 0
         token_num, sent_num = 0, len(Y_test)
+        gold_other_num, gold_other_err = 0, 0
+        pred_other_num, pred_other_err = 0, 0
+
         for sent_pred, sent_gold in zip(predictions, Y_test):
             pred_err = 0
 
@@ -257,6 +260,16 @@ class CRFTextRNN(RNNBase):
                 token_num += 1
                 if tag_pred != tag_gold:
                     pred_err += 1
+
+                    if tag_pred == other_id:
+                        pred_other_err += 1
+                    if tag_gold == other_id:
+                        gold_other_err += 1
+
+                if tag_pred == other_id:
+                    pred_other_num += 1
+                if tag_gold == other_id:
+                    gold_other_num += 1
 
                 if tag_pred > self.cardinality:
                     print('PREDICTION ({}) / CARDINALITY MISMATCH ({})'
@@ -266,7 +279,13 @@ class CRFTextRNN(RNNBase):
             if pred_err != 0:
                 sent_err += 1
 
-        return float(token_err) / token_num, float(sent_err) / sent_num
+        if gold_other_num == 0:
+            gold_other_num = 1
+        if pred_other_num == 0:
+            pred_other_num = 1
+
+        return float(token_err) / token_num, float(sent_err) / sent_num, \
+            float(gold_other_err) / gold_other_num, float(pred_other_err) / pred_other_num
 
     def train(self, X_train, Y_train, X_dev=None, max_sentence_length=None,
               **kwargs):
