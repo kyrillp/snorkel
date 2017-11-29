@@ -108,7 +108,8 @@ class CRFTextRNN(RNNBase):
         W = tf.Variable(tf.random_normal((2 * dim, self.cardinality),
                                          stddev=SD, seed=s4))
         b = tf.Variable(np.zeros(self.cardinality), dtype=tf.float32)
-        self.logits = tf.matmul(potentials, W) + b
+        # self.logits = tf.matmul(potentials, W) + b
+        self.logits = tf.matmul(potentials_dropout, W) + b
         self.logits = tf.reshape(
             self.logits, [-1, ntime_steps, self.cardinality])
         # self.marginals_op = tf.nn.softmax(self.logits)
