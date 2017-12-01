@@ -12,7 +12,7 @@ SD = 0.1
 class CRFTextRNN(RNNBase):
     """RNN for sequence labeling of strings of text."""
 
-    def _preprocess_data(self, candidates, marginals=None, extend=False):
+    def _preprocess_data(self, candidates, marginals=None, extend=False, shuffle=True):
         """Convert candidate sentences to lookup sequences
 
         :param candidates: candidates to process
@@ -43,6 +43,15 @@ class CRFTextRNN(RNNBase):
                 marg.append(marginals[cand_idx:end_idx, :])
                 cand_idx = end_idx
             marg = np.array(marg)
+
+        if shuffle:
+            indexes = np.arange(len(data))
+            np.random.shuffle(indexes)
+            data = np.array(data)[indexes]
+            ends = np.array(ends)[indexes]
+            if marginals is not None:
+                marg = marg[indexes]
+            print('Shuffled data for LSTM')
 
         return data, ends, marg
 
@@ -288,7 +297,7 @@ class CRFTextRNN(RNNBase):
         return float(token_err) / token_num, float(sent_err) / sent_num, \
             float(gold_other_err) / gold_other_num, float(pred_other_err) / pred_other_num
 
-    def train(self, X_train, Y_train, X_dev=None, max_sentence_length=None,
+    def train(self, X_train, Y_train, X_dev=None, max_sentence_length=None, shuffle=True,
               **kwargs):
         """
         Perform preprocessing of data, construct dataset-specific model, then
@@ -296,7 +305,7 @@ class CRFTextRNN(RNNBase):
         """
         # Text preprocessing
         X_train, ends, Y_train = self._preprocess_data(
-            X_train, Y_train, extend=True)
+            X_train, Y_train, extend=True, shuffle=shuffle)
         if X_dev is not None:
             X_dev, _ = self._preprocess_data(X_dev, [], extend=False)
 
