@@ -1,6 +1,8 @@
+import copy
 import numpy as np
 import tensorflow as tf
 
+from time import time
 from rnn_base import RNNBase
 from snorkel.models import Candidate
 from utils import SymbolTable, get_bi_rnn_output, get_bi_rnn_seq_output
@@ -12,7 +14,7 @@ SD = 0.1
 class CRFTextRNN(RNNBase):
     """RNN for sequence labeling of strings of text."""
 
-    def _preprocess_data(self, candidates, marginals=None, extend=False, shuffle=True):
+    def _preprocess_data(self, candidates, marginals=None, dev_labels=None, extend=False, shuffle_data=True):
         """Convert candidate sentences to lookup sequences
 
         :param candidates: candidates to process
@@ -44,16 +46,27 @@ class CRFTextRNN(RNNBase):
                 cand_idx = end_idx
             marg = np.array(marg)
 
-        if shuffle:
+        aligned_dev_labels = []
+        if dev_labels is not None:
+            cand_idx = 0
+            for sent_len in ends:
+                end_idx = cand_idx + sent_len
+                aligned_dev_labels.append(dev_labels[cand_idx:end_idx])
+                cand_idx = end_idx
+            aligned_dev_labels = np.array(aligned_dev_labels)
+
+        if shuffle_data:
             indexes = np.arange(len(data))
             np.random.shuffle(indexes)
             data = np.array(data)[indexes]
             ends = np.array(ends)[indexes]
             if marginals is not None:
                 marg = marg[indexes]
+            if dev_labels is not None:
+                aligned_dev_labels = aligned_dev_labels[indexes]
             print('Shuffled data for LSTM')
 
-        return data, ends, marg
+        return data, ends, marg, aligned_dev_labels
 
     def _build_model(self, dim=50, attn_window=None, max_len=20,
                      cell_type=tf.contrib.rnn.BasicLSTMCell,
@@ -114,6 +127,8 @@ class CRFTextRNN(RNNBase):
         # Build activation layer
         # self.Y = tf.placeholder(tf.float32, [None, self.cardinality])
         self.Y = tf.placeholder(tf.float32, [None, None, self.cardinality])
+        self.train_labels = tf.placeholder(tf.int32, [None, self.cardinality])
+
         W = tf.Variable(tf.random_normal((2 * dim, self.cardinality),
                                          stddev=SD, seed=s4))
         b = tf.Variable(np.zeros(self.cardinality), dtype=tf.float32)
@@ -141,14 +156,21 @@ class CRFTextRNN(RNNBase):
 
         losses = tf.nn.softmax_cross_entropy_with_logits(
             logits=self.logits, labels=self.Y)
+
+        # losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        #     logits=self.logits, labels=self.train_labels)
+
+        mask = tf.sequence_mask(self.sentence_lengths)
+        losses = tf.boolean_mask(losses, mask)
+
         self.loss = tf.reduce_mean(losses)
 
         # Build training op
         self.lr = tf.placeholder(tf.float32)
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
 
-    def _construct_feed_dict(self, X_b, Y_b, lr=0.01, dropout=None, **kwargs):
-        X_b, len_b, Y_b = self._make_tensor(X_b, Y_b)
+    def _construct_feed_dict(self, X_b, Y_b, lr=0.01, dropout=None, train_labels=None, **kwargs):
+        X_b, len_b, Y_b, L_b = self._make_tensor(X_b, Y_b, train_labels)
         # print()
         # print(X_b)
         # print()
@@ -160,10 +182,11 @@ class CRFTextRNN(RNNBase):
             self.sentence_lengths: len_b,
             self.Y:                Y_b,
             self.keep_prob:        dropout or 1.0,
-            self.lr:               lr
+            self.lr:               lr,
+            self.train_labels:     L_b
         }
 
-    def _make_tensor(self, x, y=None):
+    def _make_tensor(self, x, y=None, z=None):
         """Construct input tensor with padding
             Builds a matrix of symbols corresponding to @self.word_dict for the
             current batch and an array of true sentence lengths
@@ -171,9 +194,18 @@ class CRFTextRNN(RNNBase):
         batch_size = len(x)
         x_batch = np.zeros((batch_size, self.max_len), dtype=np.int32)
         y_batch = np.zeros((batch_size, self.max_len, self.cardinality))
+        z_batch = np.zeros((batch_size, self.max_len), dtype=np.int32)
         len_batch = np.zeros(batch_size, dtype=np.int32)
 
-        if y is not None:
+        if z is not None:
+            for j, (token_ids, marginals, labels) in enumerate(zip(x, y, z)):
+                t = min(len(token_ids), self.max_len)
+                x_batch[j, 0:t] = token_ids[0:t]
+                y_batch[j, 0:t] = marginals[0:t]
+                z_batch[j, 0:t] = labels[0:t]
+                len_batch[j] = t
+
+        elif y is not None:
             for j, (token_ids, marginals) in enumerate(zip(x, y)):
                 t = min(len(token_ids), self.max_len)
                 x_batch[j, 0:t] = token_ids[0:t]
@@ -186,18 +218,18 @@ class CRFTextRNN(RNNBase):
                 x_batch[j, 0:t] = token_ids[0:t]
                 len_batch[j] = t
 
-        return x_batch, len_batch, y_batch
+        return x_batch, len_batch, y_batch, z_batch
 
     def predictions(self, X, b=0.5, batch_size=None):
 
         if isinstance(X[0], Candidate):
-            X_test, ends, _ = self._preprocess_data(X, extend=False)
+            X_test, ends, _, _ = self._preprocess_data(X, extend=False)
             self._check_max_sentence_length(ends)
         else:
             X_test = X
 
         # Make tensor and run prediction op
-        x, x_len, _ = self._make_tensor(X_test)
+        x, x_len, _, _ = self._make_tensor(X_test)
         pred = self.session.run(self.pred, {
             self.sentences:        x,
             self.sentence_lengths: x_len,
@@ -232,7 +264,7 @@ class CRFTextRNN(RNNBase):
         # correct = np.where([predictions == Y_test])[0].shape[0]
         # return correct / float(Y_test.shape[0])
 
-        X_test, ends, _ = self._preprocess_data(X_test, extend=False)
+        X_test, ends, _, _ = self._preprocess_data(X_test, extend=False)
         self._check_max_sentence_length(ends)
         predictions = self.predictions(X_test, b=b, batch_size=batch_size)
 
@@ -246,7 +278,6 @@ class CRFTextRNN(RNNBase):
         cand_idx = 0
         for sent_len in ends:
             end_idx = cand_idx + sent_len
-            # print('{}/{}'.format(cand_idx, end_idx))
             labels.append(Y_test[cand_idx:end_idx])
             cand_idx = end_idx
         Y_test = np.array(labels)
@@ -297,22 +328,157 @@ class CRFTextRNN(RNNBase):
         return float(token_err) / token_num, float(sent_err) / sent_num, \
             float(gold_other_err) / gold_other_num, float(pred_other_err) / pred_other_num
 
-    def train(self, X_train, Y_train, X_dev=None, max_sentence_length=None, shuffle=True,
+    def train(self, X_train, Y_train, dev_labels=None, X_dev=None, max_sentence_length=None, shuffle=True,
               **kwargs):
         """
         Perform preprocessing of data, construct dataset-specific model, then
         train.
         """
         # Text preprocessing
-        X_train, ends, Y_train = self._preprocess_data(
-            X_train, Y_train, extend=True, shuffle=shuffle)
+        X_train, ends, Y_train, train_labels = self._preprocess_data(
+            X_train, Y_train, dev_labels=dev_labels, extend=True, shuffle_data=shuffle)
         if X_dev is not None:
-            X_dev, _ = self._preprocess_data(X_dev, [], extend=False)
+            X_dev, _, _, _ = self._preprocess_data(X_dev, [], extend=False)
 
         # Get max sentence size
         max_len = max_sentence_length or max(len(x) for x in X_train)
         self._check_max_sentence_length(ends, max_len=max_len)
 
         # Train model- note we pass word_dict through here so it gets saved...
-        super(RNNBase, self).train(X_train, Y_train, X_dev=X_dev,
-                                   word_dict=self.word_dict, max_len=max_len, **kwargs)
+        # super(RNNBase, self).train(X_train, Y_train, X_dev=X_dev,
+        #                            word_dict=self.word_dict, max_len=max_len, train_labels=train_labels, **kwargs)
+        self._train(X_train, Y_train, X_dev=X_dev,
+                    word_dict=self.word_dict, max_len=max_len, dev_labels=train_labels, **kwargs)
+
+    def _train(self, X_train, Y_train, dev_labels=None, n_epochs=25, lr=0.01, batch_size=256,
+               rebalance=False, X_dev=None, Y_dev=None, print_freq=5, dev_ckpt=True,
+               dev_ckpt_delay=0.75, save_dir='checkpoints', **kwargs):
+        """
+        Generic training procedure for TF model
+
+        :param X_train: The training Candidates. If self.representation is True, then
+            this is a list of Candidate objects; else is a csr_AnnotationMatrix
+            with rows corresponding to training candidates and columns
+            corresponding to features.
+        :param Y_train: Array of marginal probabilities for each Candidate
+        :param n_epochs: Number of training epochs
+        :param lr: Learning rate
+        :param batch_size: Batch size for SGD
+        :param rebalance: Bool or fraction of positive examples for training
+                    - if True, defaults to standard 0.5 class balance
+                    - if False, no class balancing
+        :param X_dev: Candidates for evaluation, same format as X_train
+        :param Y_dev: Labels for evaluation, same format as Y_train
+        :param print_freq: number of epochs at which to print status, and if present,
+            evaluate the dev set (X_dev, Y_dev).
+        :param dev_ckpt: If True, save a checkpoint whenever highest score
+            on (X_dev, Y_dev) reached. Note: currently only evaluates at
+            every @print_freq epochs.
+        :param dev_ckpt_delay: Start dev checkpointing after this portion
+            of n_epochs.
+        :param save_dir: Save dir path for checkpointing.
+        :param kwargs: All hyperparameters that change how the graph is built
+            must be passed through here to be saved and reloaded to save /
+            reload model. *NOTE: If a parameter needed to build the
+            network and/or is needed at test time is not included here, the
+            model will not be able to be reloaded!*
+        """
+        self._check_input(X_train)
+        verbose = print_freq > 0
+
+        # Set random seed for all numpy operations
+        self.rand_state.seed(self.seed)
+
+        # If the data passed in is a feature matrix (representation=False),
+        # set the dimensionality here; else assume this is done by sub-class
+        if not self.representation:
+            kwargs['d'] = X_train.shape[1]
+
+        if dev_labels is not None:
+            if len(dev_labels) > 0:
+                train_labels = copy.deepcopy(dev_labels)
+            else:
+                train_labels = None
+        else:
+            train_labels = None
+
+        # Create new graph, build network, and start session
+        self._build_new_graph_session(**kwargs)
+
+        # Build training ops
+        # Note that training_kwargs and model_kwargs are mixed together; ideally
+        # would be separated but no negative effect
+        with self.graph.as_default():
+            self._build_training_ops(**kwargs)
+
+        # Initialize variables
+        with self.graph.as_default():
+            self.session.run(tf.global_variables_initializer())
+
+        # Run mini-batch SGD
+        n = len(X_train) if self.representation else X_train.shape[0]
+        batch_size = min(batch_size, n)
+        if verbose:
+            st = time()
+            print("[{0}] Training model".format(self.name))
+            print("[{0}] n_train={1}  #epochs={2}  batch size={3}".format(
+                self.name, n, n_epochs, batch_size
+            ))
+        dev_score_opt = 0.0
+        for t in range(n_epochs):
+            epoch_losses = []
+            for i in range(0, n, batch_size):
+                if train_labels is not None:
+                    batch_labels = train_labels[i:min(n, i + batch_size)]
+                else:
+                    batch_labels = None
+
+                feed_dict = self._construct_feed_dict(
+                    X_train[i:min(n, i + batch_size)],
+                    Y_train[i:min(n, i + batch_size)],
+                    train_labels=batch_labels,
+                    lr=lr,
+                    **kwargs
+                )
+                # Run training step and evaluate loss function
+                epoch_loss, _ = self.session.run(
+                    [self.loss, self.optimizer], feed_dict=feed_dict)
+                epoch_losses.append(epoch_loss)
+
+            # Reshuffle training data
+            train_idxs = range(n)
+            self.rand_state.shuffle(train_idxs)
+            X_train = [X_train[j] for j in train_idxs] if self.representation \
+                else X_train[train_idxs, :]
+            Y_train = Y_train[train_idxs]
+
+            if train_labels is not None:
+                train_labels = [train_labels[j] for j in train_idxs]
+
+            # Print training stats and optionally checkpoint model
+            if verbose and (t % print_freq == 0 or t in [0, (n_epochs - 1)]):
+                msg = "[{0}] Epoch {1} ({2:.2f}s)\tAverage loss={3:.6f}".format(
+                    self.name, t, time() - st, np.mean(epoch_losses))
+                if X_dev is not None:
+                    scores = self.score(X_dev, Y_dev, batch_size=batch_size)
+                    score = scores if self.cardinality > 2 else scores[-1]
+                    score_label = "Acc." if self.cardinality > 2 else "F1"
+                    msg += '\tDev {0}={1:.2f}'.format(
+                        score_label, 100. * score)
+                print(msg)
+
+                # If best score on dev set so far and dev checkpointing is
+                # active, save checkpoint
+                if X_dev is not None and dev_ckpt and \
+                        t > dev_ckpt_delay * n_epochs and score > dev_score_opt:
+                    dev_score_opt = score
+                    self.save(save_dir=save_dir, global_step=t)
+
+        # Conclude training
+        if verbose:
+            print("[{0}] Training done ({1:.2f}s)".format(
+                self.name, time() - st))
+
+        # If checkpointing on, load last checkpoint (i.e. best on dev set)
+        if dev_ckpt and X_dev is not None and verbose and dev_score_opt > 0:
+            self.load(save_dir=save_dir)
