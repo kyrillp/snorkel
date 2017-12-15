@@ -14,7 +14,7 @@ SD = 0.1
 class CRFTextRNN(RNNBase):
     """RNN for sequence labeling of strings of text."""
 
-    def _preprocess_data(self, candidates, marginals=None, dev_labels=None, extend=False, shuffle_data=True):
+    def _preprocess_data(self, candidates, marginals=None, dev_labels=None, extend=False, shuffle_data=False):
         """Convert candidate sentences to lookup sequences
 
         :param candidates: candidates to process
@@ -180,7 +180,7 @@ class CRFTextRNN(RNNBase):
 
         # Add dropout layer
         # self.keep_prob = tf.placeholder(tf.float32)
-        # potentials_dropout = tf.nn.dropout(potentials, self.keep_prob, seed=s3)
+        potentials_dropout = tf.nn.dropout(potentials, self.keep_prob, seed=s3)
 
         # Build activation layer
         # self.Y = tf.placeholder(tf.float32, [None, self.cardinality])
@@ -191,8 +191,8 @@ class CRFTextRNN(RNNBase):
         W = tf.Variable(tf.random_normal((2 * dim, self.cardinality),
                                          stddev=SD, seed=s4))
         b = tf.Variable(np.zeros(self.cardinality), dtype=tf.float32)
-        self.logits = tf.matmul(potentials, W) + b
-        # self.logits = tf.matmul(potentials_dropout, W) + b
+        # self.logits = tf.matmul(potentials, W) + b
+        self.logits = tf.matmul(potentials_dropout, W) + b
         self.logits = tf.reshape(
             self.logits, [-1, ntime_steps, self.cardinality])
         # self.marginals_op = tf.nn.softmax(self.logits)
@@ -418,7 +418,7 @@ class CRFTextRNN(RNNBase):
             float(gold_other_err) / gold_other_num, float(pred_other_err) / pred_other_num
 
     def train(self, X_train, Y_train, dev_labels=None, X_dev=None, max_sentence_length=None,
-              shuffle=True, max_word_length=None, **kwargs):
+              shuffle=False, max_word_length=None, **kwargs):
         """
         Perform preprocessing of data, construct dataset-specific model, then
         train.
