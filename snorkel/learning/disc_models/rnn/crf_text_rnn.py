@@ -136,7 +136,7 @@ class CRFTextRNN(RNNBase):
             )
         char_out = tf.concat([char_fw_out, char_bw_out], axis=-1)
         char_rep = tf.reshape(char_out, shape=[-1, char_s[1], 2 * dim_char])
-        inputs = tf.concat([inputs, char_rep], axis=-1)
+        # inputs = tf.concat([inputs, char_rep], axis=-1)
 
         # Add dropout layer
         self.keep_prob = tf.placeholder(tf.float32)
@@ -174,18 +174,14 @@ class CRFTextRNN(RNNBase):
                 initial_state_bw=initial_state_bw,
                 time_major=False
             )
-        # potentials = get_bi_rnn_output(rnn_out, dim, self.sentence_lengths)
         potentials, ntime_steps = get_bi_rnn_seq_output(
             rnn_out, dim, self.sentence_lengths)
 
         # Add dropout layer
-        # self.keep_prob = tf.placeholder(tf.float32)
         potentials_dropout = tf.nn.dropout(potentials, self.keep_prob, seed=s3)
 
         # Build activation layer
-        # self.Y = tf.placeholder(tf.float32, [None, self.cardinality])
         self.Y = tf.placeholder(tf.float32, [None, None, self.cardinality])
-        # self.train_labels = tf.placeholder(tf.int32, [None, self.cardinality])
         self.train_labels = tf.placeholder(tf.int32, [None, self.max_len])
 
         W = tf.Variable(tf.random_normal((2 * dim, self.cardinality),
@@ -213,11 +209,11 @@ class CRFTextRNN(RNNBase):
         # self.pred, viterbi_score = tf.contrib.crf.viterbi_decode(
         #     self.logits, self.transition_params)
 
-        # losses = tf.nn.softmax_cross_entropy_with_logits(
-        #     logits=self.logits, labels=self.Y)
+        losses = tf.nn.softmax_cross_entropy_with_logits(
+            logits=self.logits, labels=self.Y)
 
-        losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
-            logits=self.logits, labels=self.train_labels)
+        # losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        #     logits=self.logits, labels=self.train_labels)
 
         mask = tf.sequence_mask(self.sentence_lengths)
         losses = tf.boolean_mask(losses, mask)
@@ -260,6 +256,19 @@ class CRFTextRNN(RNNBase):
             for j, (token_ids, words) in enumerate(zip(x, c)):
                 t = min(len(token_ids), self.max_len)
                 x_batch[j, 0:t] = token_ids[0:t]
+                len_batch[j] = t
+
+                for x, y in enumerate(words[0:t]):
+                    c_batch[j][x][0:len(y)] = y
+
+                char_t = np.array([min(len(word_ids), self.max_word_len) for word_ids in words])
+                len_words[j][0:len(char_t)] = char_t
+
+        elif c is not None and y is not None and z is None:
+            for j, (token_ids, marginals, words) in enumerate(zip(x, y, c)):
+                t = min(len(token_ids), self.max_len)
+                x_batch[j, 0:t] = token_ids[0:t]
+                y_batch[j, 0:t] = marginals[0:t]
                 len_batch[j] = t
 
                 for x, y in enumerate(words[0:t]):
@@ -324,11 +333,13 @@ class CRFTextRNN(RNNBase):
         })
 
         # logit_scores = self.session.run(self.logits, {
-        #     self.sentences: x,
+        #     self.sentences:        x,
         #     self.sentence_lengths: x_len,
-        #     self.keep_prob: 1.0
+        #     self.keep_prob:        1.0,
+        #     self.words:            _words,
+        #     self.word_lengths:     _words_len
         # })
-        #
+
         # preds = []
         # for logits in logit_scores:
         #     pred_seq, viterbi_score = tf.contrib.crf.viterbi_decode(logits,
