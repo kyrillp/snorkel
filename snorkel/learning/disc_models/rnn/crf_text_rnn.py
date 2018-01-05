@@ -364,6 +364,7 @@ class CRFTextRNN(RNNBase):
 
         X_test, ends, _, _, words, _ = self._preprocess_data(X_test, extend=False)
         self._check_max_sentence_length(ends)
+
         predictions = self.predictions(X_test, b=b, batch_size=batch_size, words=words)
 
         # # Convert Y_test to dense numpy array
@@ -564,11 +565,26 @@ class CRFTextRNN(RNNBase):
                 train_labels = [train_labels[j] for j in train_idxs]
 
             # Print training stats and optionally checkpoint model
+            # if verbose and (t % print_freq == 0 or t in [0, (n_epochs - 1)]):
+            #     msg = "[{0}] Epoch {1} ({2:.2f}s)\tAverage loss={3:.6f}".format(
+            #         self.name, t, time() - st, np.mean(epoch_losses))
+            #     if train_labels is not None:
+            #         dev_accurarcy, dev_token_err, dev_sent_err, dev_gold_other_err, dev_pred_other_err \
+            #             = self.score(X_dev, train_labels, batch_size=batch_size, preprocess=False, **kwargs)
+            #         print(msg)
+            #         print('\tDev accuracy: ' + str(dev_accurarcy))
+            #         print('\tDev token error rate: ' + str(dev_token_err))
+            #         print('\tDev sentence error rate: ' + str(dev_sent_err))
+            #         print('\tDev gold-annotated OTHER predicted as some class: ' + str(dev_gold_other_err))
+            #         print('\tDev predicted OTHER gold-annotated as some class: ' + str(dev_pred_other_err))
+            #     else:
+            #         print(msg)
+
             if verbose and (t % print_freq == 0 or t in [0, (n_epochs - 1)]):
                 msg = "[{0}] Epoch {1} ({2:.2f}s)\tAverage loss={3:.6f}".format(
                     self.name, t, time() - st, np.mean(epoch_losses))
                 if X_dev is not None:
-                    scores = self.score(X_dev, Y_dev, batch_size=batch_size)
+                    scores = self.score(X_train, Y_dev, batch_size=batch_size)
                     score = scores if self.cardinality > 2 else scores[-1]
                     score_label = "Acc." if self.cardinality > 2 else "F1"
                     msg += '\tDev {0}={1:.2f}'.format(
