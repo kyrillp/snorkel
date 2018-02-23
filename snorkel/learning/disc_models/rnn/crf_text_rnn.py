@@ -317,7 +317,8 @@ class CRFTextRNN(RNNBase):
     def predictions(self, X, b=0.5, batch_size=None, words=None):
 
         if isinstance(X[0], Candidate):
-            X_test, ends, _, _, words, _ = self._preprocess_data(X, extend=False)
+            X_test, ends, _, _, pwords, _ = self._preprocess_data(X, extend=False)
+            words = pwords if words is not None else None
             self._check_max_sentence_length(ends)
         else:
             X_test = X
@@ -350,7 +351,8 @@ class CRFTextRNN(RNNBase):
         # return preds
 
     def score(self, X_test, Y_test, b=0.5, set_unlabeled_as_neg=True, beta=1,
-              batch_size=None, other_id=-1):
+              batch_size=None, other_id=-1, out_path='predictions.txt',
+              ids_to_classes=None, use_chars=False):
 
         # predictions, viterbi_score = self.predictions(X_test, b, batch_size)
         # pred_words = [self.word_dict.reverse()[i] for i in predictions]
@@ -365,6 +367,7 @@ class CRFTextRNN(RNNBase):
         X_test, ends, _, _, words, _ = self._preprocess_data(X_test, extend=False)
         self._check_max_sentence_length(ends)
 
+        words = words if use_chars else None
         predictions = self.predictions(X_test, b=b, batch_size=batch_size, words=words)
 
         # # Convert Y_test to dense numpy array
@@ -390,10 +393,13 @@ class CRFTextRNN(RNNBase):
         other_total, other_as_class = 0, 0
         class_total, class_as_other = 0, 0
 
-        for sent_pred, sent_gold in zip(predictions, Y_test):
+        ids_to_words = self.word_dict.reverse()
+        # with open(out_path, 'w') as out:
+
+        for sent_pred, sent_gold, sent in zip(predictions, Y_test, X_test):
             pred_err = 0
 
-            for tag_pred, tag_gold in zip(sent_pred, sent_gold):
+            for tag_pred, tag_gold, token in zip(sent_pred, sent_gold, sent):
                 token_num += 1
 
                 if tag_gold == other_id:
@@ -416,9 +422,24 @@ class CRFTextRNN(RNNBase):
                     print('PREDICTION ({}) / CARDINALITY MISMATCH ({})'
                           .format(tag_pred, self.cardinality))
 
+                    # word = ids_to_words.get(token, None)
+                    # if ids_to_classes is not None:
+                    #     # In Snorkel, class IDs have to start at 1 because 0 is the reserved value for abstaining
+                    #     # labeling functions. There is no abstention in TensorFlow, i.e. classes have to be zero-indexed.
+                    #     class_pred = ids_to_classes.get(tag_pred + 1, None)
+                    #     class_gold = ids_to_classes.get(tag_gold + 1, None)
+                    # else:
+                    #     class_pred = tag_pred
+                    #     class_gold = tag_gold
+
+                    # out.write('{}\t{}\t{}'.format(word, class_pred, class_gold))
+                    # out.write('\n')
+
             token_err += pred_err
             if pred_err != 0:
                 sent_err += 1
+
+                # out.write('\n')
 
         if other_total == 0:
             other_total = 1
