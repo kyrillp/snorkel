@@ -10,7 +10,8 @@ import math
 @jit(nopython=True, cache=True, nogil=True)
 def gibbsthread(shardID, nshards, var_copy, weight_copy, weight, variable,
                 factor, fmap, vmap, factor_index, Z, cstart,
-                count, var_value, weight_value, sample_evidence, burnin):
+                count, var_value, weight_value, sample_evidence, burnin,
+                transition_matrix, start_state_vid):
     """TODO."""
     # Indentify start and end variable
     nvar = variable.shape[0]
@@ -24,7 +25,8 @@ def gibbsthread(shardID, nshards, var_copy, weight_copy, weight, variable,
         if variable[var_samp]["isEvidence"] == 0 or sample_evidence:
             v = draw_sample(var_samp, var_copy, weight_copy, weight, variable,
                             factor, fmap, vmap, factor_index, Z[shardID],
-                            var_value, weight_value)
+                            var_value, weight_value,
+                            transition_matrix, start_state_vid)
             var_value[var_copy][var_samp] = v
             if not burnin:
                 if variable[var_samp]["cardinality"] == 2:
@@ -35,14 +37,15 @@ def gibbsthread(shardID, nshards, var_copy, weight_copy, weight, variable,
 
 @jit(nopython=True, cache=True, nogil=True)
 def draw_sample(var_samp, var_copy, weight_copy, weight, variable, factor,
-                fmap, vmap, factor_index, Z, var_value, weight_value):
+                fmap, vmap, factor_index, Z, var_value, weight_value,
+                transition_matrix, start_state_vid):
     """TODO."""
     cardinality = variable[var_samp]["cardinality"]
     for value in range(cardinality):
         Z[value] = np.exp(potential(var_samp, value, var_copy, weight_copy,
                                     weight, variable, factor, fmap,
                                     vmap, factor_index, var_value,
-                                    weight_value))
+                                    weight_value, transition_matrix, start_state_vid))
 
     for j in range(1, cardinality):
         Z[j] += Z[j - 1]
@@ -54,7 +57,8 @@ def draw_sample(var_samp, var_copy, weight_copy, weight, variable, factor,
 
 @jit(nopython=True, cache=True, nogil=True)
 def potential(var_samp, value, var_copy, weight_copy, weight, variable, factor,
-              fmap, vmap, factor_index, var_value, weight_value):
+              fmap, vmap, factor_index, var_value, weight_value,
+              transition_matrix, start_state_vid):
     """TODO."""
     p = 0.0
     varval_off = value
@@ -67,7 +71,7 @@ def potential(var_samp, value, var_copy, weight_copy, weight, variable, factor,
         factor_id = factor_index[k]
         p += weight_value[weight_copy][factor[factor_id]["weightId"]] * \
             eval_factor(factor_id, var_samp, value, var_copy, variable,
-                        factor, fmap, var_value)
+                        factor, fmap, var_value, transition_matrix, start_state_vid)
     return p
 
 
@@ -135,11 +139,13 @@ FACTORS = {
     # h(l_1, l_2) := if l_1 != 0 and l_2 != 0: -1, else: 0
     "DP_GEN_DEP_EXCLUSIVE": 25,
 
-    #h(l_1, l_2) := if l_1 == l_2: 1, else: 0
+    # h(l_1, l_2) := if l_1 == l_2: 1, else: 0
     "DP_GEN_DEP_SIMILAR": 26,
 
     # Factor functions for distribution
-    "UFO": 30
+    "UFO": 30,
+
+    "DP_GEN_CLASS_SEQ": 31
 }
 
 for (key, value) in FACTORS.items():
@@ -148,7 +154,7 @@ for (key, value) in FACTORS.items():
 
 @jit(nopython=True, cache=True, nogil=True)
 def eval_factor(factor_id, var_samp, value, var_copy, variable, factor, fmap,
-                var_value):
+                var_value, transition_matrix, start_state_vid):
     """TODO."""
     ####################
     # BINARY VARIABLES #
@@ -391,6 +397,30 @@ def eval_factor(factor_id, var_samp, value, var_copy, variable, factor, fmap,
         l2_index = value if fmap[ftv_start + 1]["vid"] == var_samp else \
             var_value[var_copy][fmap[ftv_start + 1]["vid"]]
         return 1 if l1_index == l2_index else 0
+
+    ######################################
+    # FACTORS FOR SEQUENTIAL INFORMATION #
+    ######################################
+    elif factor[factor_id]["factorFunction"] == FUNC_DP_GEN_CLASS_SEQ:
+        abstain = variable[fmap[ftv_start + 1]["vid"]]["cardinality"] - 1
+        y_curr_index = value if fmap[ftv_start]["vid"] == var_samp else \
+            var_value[var_copy][fmap[ftv_start]["vid"]]
+
+        if y_curr_index == abstain:
+            return 0
+
+        if fmap[ftv_start + 1]["vid"] == start_state_vid:
+            y_prev_index = 0
+        elif fmap[ftv_start + 1]["vid"] == var_samp:
+            # shift y_prev by one since 0 is reserved for the start state in the transition matrix
+            y_prev_index = value + 1
+        else:
+            y_prev_index = var_value[var_copy][fmap[ftv_start + 1]["vid"]] + 1
+
+        # y_prev_index is actual class at time t - 1 if Y_t-1 is not the start state
+        # access, update and return sequential occurrence mapping
+        transition_matrix[y_prev_index][y_curr_index] += 1
+        return transition_matrix[y_prev_index][y_curr_index]
 
     ###########################################
     # FACTORS FOR OPTIMIZING DISTRIBUTED CODE #

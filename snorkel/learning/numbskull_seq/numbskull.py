@@ -6,10 +6,10 @@ from __future__ import print_function, absolute_import
 import os
 import sys
 import argparse
-import numbskull.factorgraph
-from numbskull.factorgraph import FactorGraph
-from numbskull.dataloading import *
-from numbskull.numbskulltypes import *
+from . import factorgraph
+from .factorgraph import FactorGraph
+from .dataloading import *
+from .numbskulltypes import *
 import numpy as np
 
 
@@ -189,7 +189,7 @@ class NumbSkull(object):
         self.factorGraphs.append(fg)
 
     def loadFactorGraph(self, weight, variable, factor, fmap, domain_mask,
-                        edges, var_copies=1, weight_copies=1,
+                        edges, transition_matrix, start_state_vid, var_copies=1, weight_copies=1,
                         factors_to_skip=np.empty(0, np.int64)):
         """TODO."""
         # Note: factors_to_skip must be sorted
@@ -238,7 +238,8 @@ class NumbSkull(object):
 
         fg = FactorGraph(weight, variable, factor, fmap, vmap, factor_index,
                          var_copies, weight_copies,
-                         len(self.factorGraphs), self.nthreads)
+                         len(self.factorGraphs), self.nthreads,
+                         transition_matrix, start_state_vid)
         self.factorGraphs.append(fg)
 
     def loadFGFromFile(self, directory=None, metafile=None, weightfile=None,

@@ -86,7 +86,8 @@ class GenerativeModel(Classifier):
               LF_acc_prior_weight_default=1, labels=None, label_prior_weight=5,
               init_deps=0.0, init_class_prior=-1.0, epochs=30, step_size=None,
               decay=1.0, reg_param=0.1, reg_type=2, verbose=False, truncation=10,
-              burn_in=5, cardinality=None, timer=None, candidate_ranges=None, threads=1):
+              burn_in=5, cardinality=None, timer=None, candidate_ranges=None, threads=1,
+              shuffle=True):
         """
         Fits the parameters of the model to a data set. By default, learns a
         conditionally independent model. Additional unary dependencies can be
@@ -206,20 +207,22 @@ class GenerativeModel(Classifier):
             L, self.cardinalities, _ = self._remap_scoped_categoricals(L,
                                                                        self.candidate_ranges)
 
-        # Shuffle the data points, cardinalities, and candidate_ranges
-        idxs = self.rng.permutation(list(range(m)))
-        L = L[idxs, :]
-        if candidate_ranges is not None:
-            self.cardinalities = self.cardinalities[idxs]
-            c_ranges_reshuffled = []
-            for i in idxs:
-                c_ranges_reshuffled.append(self.candidate_ranges[i])
-            self.candidate_ranges = c_ranges_reshuffled
+        if shuffle:
+            # Shuffle the data points, cardinalities, and candidate_ranges
+            idxs = self.rng.permutation(list(range(m)))
+            L = L[idxs, :]
+            if candidate_ranges is not None:
+                self.cardinalities = self.cardinalities[idxs]
+                c_ranges_reshuffled = []
+                for i in idxs:
+                    c_ranges_reshuffled.append(self.candidate_ranges[i])
+                self.candidate_ranges = c_ranges_reshuffled
 
         # Compile factor graph
         self._process_dependency_graph(L, deps)
-        weight, variable, factor, ftv, domain_mask, n_edges = self._compile(
-            L, init_deps, init_class_prior, LF_acc_prior_weights, is_fixed, self.cardinalities)
+        weight, variable, factor, ftv, domain_mask, n_edges, transition_matrix, start_state_vid = \
+            self._compile(L, init_deps, init_class_prior,
+                          LF_acc_prior_weights, is_fixed, self.cardinalities)
         fg = NumbSkull(
             n_inference_epoch=0,
             n_learning_epoch=epochs,
@@ -234,7 +237,8 @@ class GenerativeModel(Classifier):
             burn_in=burn_in,
             nthreads=threads
         )
-        fg.loadFactorGraph(weight, variable, factor, ftv, domain_mask, n_edges)
+        fg.loadFactorGraph(weight, variable, factor, ftv, domain_mask, n_edges,
+                           transition_matrix, start_state_vid)
 
         if timer is not None:
             timer.start()
@@ -249,7 +253,7 @@ class GenerativeModel(Classifier):
         else:
             self.cardinality_for_stats = self.cardinality
         self.learned_weights = fg.factorGraphs[0].weight_value
-        weight, variable, factor, ftv, domain_mask, n_edges =\
+        weight, variable, factor, ftv, domain_mask, n_edges, transition_matrix, start_state_vid =\
             self._compile(sparse.coo_matrix((1, n), L.dtype), init_deps,
                           init_class_prior, LF_acc_prior_weights, is_fixed,
                           [self.cardinality_for_stats])
@@ -259,7 +263,8 @@ class GenerativeModel(Classifier):
         weight["initialValue"] = fg.factorGraphs[0].weight_value
 
         fg.factorGraphs = []
-        fg.loadFactorGraph(weight, variable, factor, ftv, domain_mask, n_edges)
+        fg.loadFactorGraph(weight, variable, factor, ftv, domain_mask, n_edges,
+                           transition_matrix, start_state_vid)
 
         self.fg = fg
         self.nlf = n
@@ -537,7 +542,8 @@ class GenerativeModel(Classifier):
         for dep_name in GenerativeModel.dep_names:
             n_weights += getattr(self, dep_name).getnnz()
 
-        n_vars = m * (n + 1)
+        # additional marker variable for start state
+        n_vars = m * (n + 1) + 1
         n_factors = m * n_weights
 
         n_edges = 1 if self.class_prior else 0
@@ -557,6 +563,8 @@ class GenerativeModel(Classifier):
         factor = np.zeros(n_factors, Factor)
         ftv = np.zeros(n_edges, FactorToVar)
         domain_mask = np.zeros(n_vars, np.bool)
+
+        transition_matrix = np.zeros((self.cardinality + 1, self.cardinality), np.int64)
 
         #
         # Compiles weight matrix
@@ -640,6 +648,13 @@ class GenerativeModel(Classifier):
                 else:
                     raise ValueError("Invalid labeling function output in cell (%d, %d): %d. "
                                      "Valid values are 0 to %d. " % (i, j, data, self.cardinalities[i]))
+
+        # start state marker
+        # treat as fixed class variable
+        variable[-1]["isEvidence"] = 1
+        variable[-1]["dataType"] = 0
+        variable[-1]["cardinality"] = self.cardinality + 1
+        variable[-1]["initialValue"] = self.cardinality
 
         #
         # Compiles factor and ftv matrices
@@ -726,7 +741,7 @@ class GenerativeModel(Classifier):
                                                                       f_off, ftv, ftv_off, w_off, mat.row[i], mat.col[i],
                                                                       dep_name_map[dep_name][0], dep_name_map[dep_name][1])
 
-        return weight, variable, factor, ftv, domain_mask, n_edges
+        return weight, variable, factor, ftv, domain_mask, n_edges, transition_matrix, start_state_vid
 
     def _compile_output_factors(self, L, factors, factors_offset, ftv,
                                 ftv_offset, weight_offset, factor_name, vid_funcs,

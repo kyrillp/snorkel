@@ -3,9 +3,9 @@
 from __future__ import print_function, absolute_import
 import sys
 import numpy as np
-from numbskull.inference import *
-from numbskull.learning import *
-from numbskull.timer import Timer
+from .inference import *
+from .learning import *
+from .timer import Timer
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
@@ -28,7 +28,8 @@ class FactorGraph(object):
     """TODO."""
 
     def __init__(self, weight, variable, factor, fmap, vmap,
-                 factor_index, var_copies, weight_copies, fid, workers):
+                 factor_index, var_copies, weight_copies, fid, workers,
+                 transition_matrix, start_state_vid):
         """TODO."""
         self.weight = weight
         self.variable = variable
@@ -51,6 +52,9 @@ class FactorGraph(object):
             np.tile(self.variable[:]['initialValue'], (var_copies, 1))
         self.weight_value = \
             np.tile(self.weight[:]['initialValue'], (weight_copies, 1))
+
+        self.transition_matrix = transition_matrix
+        self.start_state_vid = start_state_vid
 
         if self.variable.size == 0:
             self.Z = np.zeros((workers, 0))
@@ -137,7 +141,8 @@ class FactorGraph(object):
                     self.weight, self.variable, self.factor,
                     self.fmap, self.vmap,
                     self.factor_index, self.Z, self.cstart, self.count,
-                    self.var_value, self.weight_value, sample_evidence, True)
+                    self.var_value, self.weight_value, sample_evidence, True,
+                    self.transition_matrix, self.start_state_vid)
             run_pool(self.threadpool, self.threads, gibbsthread, args)
         if diagnostics:
             print("FACTOR " + str(self.fid) + ": DONE WITH BURN-IN")
@@ -159,7 +164,8 @@ class FactorGraph(object):
                         self.variable, self.factor, self.fmap,
                         self.vmap, self.factor_index, self.Z,
                         self.cstart, self.count, self.var_value,
-                        self.weight_value, sample_evidence, False)
+                        self.weight_value, sample_evidence, False,
+                        self.transition_matrix, self.start_state_vid)
                 run_pool(self.threadpool, self.threads, gibbsthread, args)
             self.inference_epoch_time = timer.interval
             self.inference_total_time += timer.interval
@@ -198,7 +204,8 @@ class FactorGraph(object):
                         self.variable, self.factor, self.fmap,
                         self.vmap, self.factor_index, self.Z, self.fids,
                         self.var_value, self.var_value_evid,
-                        self.weight_value, learn_non_evidence)
+                        self.weight_value, learn_non_evidence,
+                        self.transition_matrix, self.start_state_vid)
                 run_pool(self.threadpool, self.threads, learnthread, args)
             self.learning_epoch_time = timer.interval
             self.learning_total_time += timer.interval
