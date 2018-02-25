@@ -46,7 +46,8 @@ class GenerativeModel(Classifier):
     """
 
     def __init__(self, class_prior=False, lf_prior=False, lf_propensity=False,
-                 lf_class_propensity=False, seed=271828, name=None):
+                 lf_class_propensity=False, seed=271828, name=None,
+                 seq_class=False):
         self.name = name or self.__class__.__name__
         try:
             # numbskull_version = numbskull.__version__
@@ -63,6 +64,7 @@ class GenerativeModel(Classifier):
         self.lf_prior = lf_prior
         self.lf_propensity = lf_propensity
         self.lf_class_propensity = lf_class_propensity
+        self.seq_class = seq_class
         self.weights = None
 
         self.rng = np.random.RandomState()
@@ -87,7 +89,7 @@ class GenerativeModel(Classifier):
               init_deps=0.0, init_class_prior=-1.0, epochs=30, step_size=None,
               decay=1.0, reg_param=0.1, reg_type=2, verbose=False, truncation=10,
               burn_in=5, cardinality=None, timer=None, candidate_ranges=None, threads=1,
-              shuffle=True):
+              shuffle=True, seq_lengths=None):
         """
         Fits the parameters of the model to a data set. By default, learns a
         conditionally independent model. Additional unary dependencies can be
@@ -170,6 +172,14 @@ class GenerativeModel(Classifier):
                         "L.max() == %s, cannot infer cardinality." % lmax)
             print("Inferred cardinality: %s" % cardinality)
         self.cardinality = cardinality
+
+        if self.seq_class and seq_lengths is None:
+            raise ValueError("No sequence information given for sequential model")
+
+        if seq_lengths is not None:
+            assert(sum(seq_lengths) == m)
+            self.sequence_lengths = seq_lengths
+            self.num_sequences = len(seq_lengths)
 
         # Priors for LFs default to fixed prior value
         # NOTE: Setting default != 0.5 creates a (fixed) factor which increases
@@ -542,6 +552,10 @@ class GenerativeModel(Classifier):
         for dep_name in GenerativeModel.dep_names:
             n_weights += getattr(self, dep_name).getnnz()
 
+        if self.seq_class:
+            # weight for transition model
+            n_weights += 1
+
         # additional marker variable for start state
         n_vars = m * (n + 1) + 1
         n_factors = m * n_weights
@@ -558,12 +572,16 @@ class GenerativeModel(Classifier):
             3 * self.dep_reinforcing.getnnz() + 2 * self.dep_exclusive.getnnz()
         n_edges *= m
 
+        if self.seq_class:
+            n_edges += 2 * sum(self.sequence_lengths)
+
         weight = np.zeros(n_weights, Weight)
         variable = np.zeros(n_vars, Variable)
         factor = np.zeros(n_factors, Factor)
         ftv = np.zeros(n_edges, FactorToVar)
         domain_mask = np.zeros(n_vars, np.bool)
 
+        # transition_matrix[0] is reserved for start state
         transition_matrix = np.zeros((self.cardinality + 1, self.cardinality), np.int64)
 
         #
@@ -592,6 +610,7 @@ class GenerativeModel(Classifier):
                 weight[w_off]['initialValue'] = np.float64(0)
                 w_off += 1
 
+        # includes initialization of transition weight
         for i in range(w_off, weight.shape[0]):
             weight[i]['isFixed'] = False
             weight[i]['initialValue'] = np.float64(init_deps)
@@ -651,10 +670,11 @@ class GenerativeModel(Classifier):
 
         # start state marker
         # treat as fixed class variable
-        variable[-1]["isEvidence"] = 1
-        variable[-1]["dataType"] = 0
-        variable[-1]["cardinality"] = self.cardinality + 1
-        variable[-1]["initialValue"] = self.cardinality
+        start_state_vid = n_vars - 1
+        variable[start_state_vid]["isEvidence"] = 1
+        variable[start_state_vid]["dataType"] = 0
+        variable[start_state_vid]["cardinality"] = self.cardinality + 1
+        variable[start_state_vid]["initialValue"] = self.cardinality
 
         #
         # Compiles factor and ftv matrices
@@ -707,6 +727,9 @@ class GenerativeModel(Classifier):
                                                                      optional_name_map[optional_name][0],
                                                                      optional_name_map[optional_name][1])
 
+        f_off, ftv_off, w_off = self._compile_seq_factors(
+            L, factor, f_off, ftv, ftv_off, w_off, "DP_GEN_CLASS_SEQ", start_state_vid)
+
         # Factors for labeling function dependencies
         dep_name_map = {
             'dep_similar':
@@ -741,7 +764,8 @@ class GenerativeModel(Classifier):
                                                                       f_off, ftv, ftv_off, w_off, mat.row[i], mat.col[i],
                                                                       dep_name_map[dep_name][0], dep_name_map[dep_name][1])
 
-        return weight, variable, factor, ftv, domain_mask, n_edges, transition_matrix, start_state_vid
+        return weight, variable, factor, ftv, domain_mask, n_edges, \
+            transition_matrix, start_state_vid
 
     def _compile_output_factors(self, L, factors, factors_offset, ftv,
                                 ftv_offset, weight_offset, factor_name, vid_funcs,
@@ -776,6 +800,39 @@ class GenerativeModel(Classifier):
                         ftv_index += 1
 
         return factors_index, ftv_index, w_off
+
+    def _compile_seq_factors(self, L, factors, factors_offset, ftv, ftv_offset,
+                             transition_weight_id, factor_name, start_state_vid):
+        """
+        Compiles factors for sequential dependencies between latent class variables of length 2.
+        """
+        m, n = L.shape
+        curr_seq = 0
+        curr_seq_length = 0
+
+        for i in range(m):
+            factors_index = factors_offset + i
+            ftv_index = ftv_offset + 2 * i
+
+            factors[factors_index]["factorFunction"] = FACTORS[factor_name]
+            factors[factors_index]["weightId"] = transition_weight_id
+            factors[factors_index]["featureValue"] = 1
+            factors[factors_index]["arity"] = 2
+            factors[factors_index]["ftv_offset"] = ftv_index
+
+            ftv[ftv_index]["vid"] = i
+
+            if curr_seq_length == 0:
+                ftv[ftv_index + 1]["vid"] = start_state_vid
+            else:
+                ftv[ftv_index + 1]["vid"] = i - 1
+
+            curr_seq_length += 1
+            if curr_seq_length == self.sequence_lengths[curr_seq]:
+                curr_seq += 1
+                curr_seq_length = 0
+
+        return factors_offset + m, ftv_offset + 2 * m, transition_weight_id + 1
 
     def _compile_dep_factors(self, L, factors, factors_offset, ftv, ftv_offset, weight_offset, j, k, factor_name, vid_funcs):
         """
