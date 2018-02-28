@@ -9,13 +9,13 @@ import random
 from .inference import draw_sample, eval_factor
 
 
-@jit(nopython=True, cache=True, nogil=True)
+@jit(nopython=True, cache=False, nogil=True)
 def learnthread(shardID, nshards, step, regularization, reg_param, truncation,
                 var_copy, weight_copy, weight,
                 variable, factor, fmap,
                 vmap, factor_index, Z, fids, var_value, var_value_evid,
                 weight_value, learn_non_evidence,
-                transition_matrix, start_state_vid):
+                transition_matrix, start_state_vid, transition_matrix_copy):
     """TODO."""
     # Identify start and end variable
     nvar = variable.shape[0]
@@ -26,14 +26,14 @@ def learnthread(shardID, nshards, step, regularization, reg_param, truncation,
             # This variable is not owned by this machine
             continue
         sample_and_sgd(var_samp, step, regularization, reg_param, truncation,
-                       var_copy, weight_copy, weight, variable,
-                       factor, fmap, vmap,
-                       factor_index, Z[shardID], fids[shardID], var_value,
-                       var_value_evid, weight_value, learn_non_evidence,
-                       transition_matrix, start_state_vid)
+                       var_copy, weight_copy, weight, variable, factor, fmap,
+                       vmap, factor_index, Z[shardID], fids[shardID], var_value, var_value_evid,
+                       weight_value, learn_non_evidence,
+                       transition_matrix, start_state_vid,
+                       transition_matrix_copy)
 
 
-@jit(nopython=True, cache=True, nogil=True)
+@jit(nopython=True, cache=False, nogil=True)
 def get_factor_id_range(variable, vmap, var_samp, val):
     """TODO."""
     varval_off = val
@@ -45,12 +45,12 @@ def get_factor_id_range(variable, vmap, var_samp, val):
     return (start, end)
 
 
-@jit(nopython=True, cache=True, nogil=True)
+@jit(nopython=True, cache=False, nogil=True)
 def sample_and_sgd(var_samp, step, regularization, reg_param, truncation,
                    var_copy, weight_copy, weight, variable, factor, fmap,
                    vmap, factor_index, Z, fids, var_value, var_value_evid,
                    weight_value, learn_non_evidence,
-                   transition_matrix, start_state_vid):
+                   transition_matrix, start_state_vid, transition_matrix_copy):
     """TODO."""
     # If learn_non_evidence sample twice.
     # The method corresponds to expectation-conjugate descent.
@@ -58,7 +58,9 @@ def sample_and_sgd(var_samp, step, regularization, reg_param, truncation,
         evidence = draw_sample(var_samp, var_copy, weight_copy,
                                weight, variable, factor,
                                fmap, vmap, factor_index, Z,
-                               var_value_evid, weight_value)
+                               var_value_evid, weight_value,
+                               transition_matrix, start_state_vid,
+                               transition_matrix_copy)
     # If evidence then store the initial value in a tmp variable
     # then sample and compute the gradient.
     else:
@@ -68,7 +70,9 @@ def sample_and_sgd(var_samp, step, regularization, reg_param, truncation,
     # Sample the variable
     proposal = draw_sample(var_samp, var_copy, weight_copy, weight,
                            variable, factor, fmap, vmap,
-                           factor_index, Z, var_value, weight_value)
+                           factor_index, Z, var_value, weight_value,
+                           transition_matrix, start_state_vid,
+                           transition_matrix_copy)
 
     var_value[var_copy][var_samp] = proposal
     if not learn_non_evidence and variable[var_samp]["isEvidence"] != 1:
@@ -105,12 +109,14 @@ def sample_and_sgd(var_samp, step, regularization, reg_param, truncation,
                          evidence, var_copy,
                          variable, factor, fmap,
                          var_value_evid,
-                         transition_matrix, start_state_vid)
+                         transition_matrix, start_state_vid,
+                         transition_matrix_copy)
         p1 = eval_factor(factor_id, var_samp,
                          proposal, var_copy,
                          variable, factor, fmap,
                          var_value,
-                         transition_matrix, start_state_vid)
+                         transition_matrix, start_state_vid,
+                         transition_matrix_copy)
         gradient = (p1 - p0) * factor[factor_id]["featureValue"]
         # Update weight
         w = weight_value[weight_copy][weight_id]

@@ -29,7 +29,8 @@ class FactorGraph(object):
 
     def __init__(self, weight, variable, factor, fmap, vmap,
                  factor_index, var_copies, weight_copies, fid, workers,
-                 transition_matrix, start_state_vid):
+                 transition_matrix, start_state_vid,
+                 transition_matrix_copies):
         """TODO."""
         self.weight = weight
         self.variable = variable
@@ -53,7 +54,11 @@ class FactorGraph(object):
         self.weight_value = \
             np.tile(self.weight[:]['initialValue'], (weight_copies, 1))
 
-        self.transition_matrix = transition_matrix
+        if transition_matrix_copies == 1:
+            self.transition_matrix = np.array([transition_matrix])
+        else:
+            raise NotImplementedError
+
         self.start_state_vid = start_state_vid
 
         if self.variable.size == 0:
@@ -131,7 +136,7 @@ class FactorGraph(object):
     ################################
 
     def burnIn(self, epochs, sample_evidence, diagnostics=False,
-               var_copy=0, weight_copy=0):
+               var_copy=0, weight_copy=0, transition_matrix_copy=0):
         """TODO."""
         if diagnostics:
             print("FACTOR " + str(self.fid) + ": STARTED BURN-IN...")
@@ -142,13 +147,14 @@ class FactorGraph(object):
                     self.fmap, self.vmap,
                     self.factor_index, self.Z, self.cstart, self.count,
                     self.var_value, self.weight_value, sample_evidence, True,
-                    self.transition_matrix, self.start_state_vid)
+                    self.transition_matrix, self.start_state_vid,
+                    transition_matrix_copy)
             run_pool(self.threadpool, self.threads, gibbsthread, args)
         if diagnostics:
             print("FACTOR " + str(self.fid) + ": DONE WITH BURN-IN")
 
     def inference(self, burnin_epochs, epochs, sample_evidence=False,
-                  diagnostics=False, var_copy=0, weight_copy=0):
+                  diagnostics=False, var_copy=0, weight_copy=0, transition_matrix_copy=0):
         """TODO."""
         # Burn-in
         if burnin_epochs > 0:
@@ -165,7 +171,8 @@ class FactorGraph(object):
                         self.vmap, self.factor_index, self.Z,
                         self.cstart, self.count, self.var_value,
                         self.weight_value, sample_evidence, False,
-                        self.transition_matrix, self.start_state_vid)
+                        self.transition_matrix, self.start_state_vid,
+                        transition_matrix_copy)
                 run_pool(self.threadpool, self.threads, gibbsthread, args)
             self.inference_epoch_time = timer.interval
             self.inference_total_time += timer.interval
@@ -182,7 +189,8 @@ class FactorGraph(object):
 
     def learn(self, burnin_epochs, epochs, stepsize, decay, regularization,
               reg_param, truncation, diagnostics=False, verbose=False,
-              learn_non_evidence=False, var_copy=0, weight_copy=0):
+              learn_non_evidence=False, var_copy=0, weight_copy=0,
+              transition_matrix_copy=0):
         """TODO."""
         # Burn-in
         if burnin_epochs > 0:
@@ -205,7 +213,8 @@ class FactorGraph(object):
                         self.vmap, self.factor_index, self.Z, self.fids,
                         self.var_value, self.var_value_evid,
                         self.weight_value, learn_non_evidence,
-                        self.transition_matrix, self.start_state_vid)
+                        self.transition_matrix, self.start_state_vid,
+                        transition_matrix_copy)
                 run_pool(self.threadpool, self.threads, learnthread, args)
             self.learning_epoch_time = timer.interval
             self.learning_total_time += timer.interval

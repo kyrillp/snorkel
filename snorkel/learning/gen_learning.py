@@ -573,7 +573,11 @@ class GenerativeModel(Classifier):
         n_edges *= m
 
         if self.seq_class:
-            n_edges += 2 * sum(self.sequence_lengths)
+            # sum(self.sequence_lengths) == m if m is actual labeling matrix
+            # don't use self.sequence_lengths here to prevent memory leak when passing data to numba
+            # since factor graph can also be loaded with a dummy matrix
+            # with m < sum(self.sequence_lengths)
+            n_edges += 2 * m
 
         weight = np.zeros(n_weights, Weight)
         variable = np.zeros(n_vars, Variable)
@@ -727,8 +731,9 @@ class GenerativeModel(Classifier):
                                                                      optional_name_map[optional_name][0],
                                                                      optional_name_map[optional_name][1])
 
-        f_off, ftv_off, w_off = self._compile_seq_factors(
-            L, factor, f_off, ftv, ftv_off, w_off, "DP_GEN_CLASS_SEQ", start_state_vid)
+        if self.seq_class:
+            f_off, ftv_off, w_off = self._compile_seq_factors(
+                L, factor, f_off, ftv, ftv_off, w_off, "DP_GEN_CLASS_SEQ", start_state_vid)
 
         # Factors for labeling function dependencies
         dep_name_map = {
@@ -763,6 +768,10 @@ class GenerativeModel(Classifier):
                     f_off, ftv_off, w_off = self._compile_dep_factors(L, factor,
                                                                       f_off, ftv, ftv_off, w_off, mat.row[i], mat.col[i],
                                                                       dep_name_map[dep_name][0], dep_name_map[dep_name][1])
+
+        assert(w_off == n_weights)
+        assert(f_off == n_factors)
+        assert(ftv_off == n_edges)
 
         return weight, variable, factor, ftv, domain_mask, n_edges, \
             transition_matrix, start_state_vid
@@ -884,6 +893,10 @@ class GenerativeModel(Classifier):
                 setattr(weights, optional_name, np.copy(w[w_off:w_off + n]))
                 w_off += n
 
+        if self.seq_class:
+            weights.transition_weight = w[w_off]
+            w_off += 1
+
         for dep_name in self.dep_names:
             mat = getattr(self, dep_name)
             weight_mat = sparse.lil_matrix((n, n))
@@ -894,6 +907,8 @@ class GenerativeModel(Classifier):
                 w_off += 1
 
             setattr(weights, dep_name, weight_mat.tocsr(copy=True))
+
+        assert(w_off == len(w))
 
         self.weights = weights
 
@@ -942,6 +957,8 @@ class GenerativeModelWeights(object):
         self.lf_accuracy = np.zeros(n, dtype=np.float64)
         for optional_name in GenerativeModel.optional_names:
             setattr(self, optional_name, np.zeros(n, dtype=np.float64))
+
+        self.transition_weight = 0.0
 
         for dep_name in GenerativeModel.dep_names:
             setattr(self, dep_name, sparse.lil_matrix((n, n), dtype=np.float64))
