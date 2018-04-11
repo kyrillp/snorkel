@@ -58,7 +58,7 @@ def sample_and_sgd(var_samp, step, regularization, reg_param, truncation,
         evidence = draw_sample(var_samp, var_copy, weight_copy,
                                weight, variable, factor,
                                fmap, vmap, factor_index, Z,
-                               var_value_evid, weight_value,
+                               var_value_evid, weight_value, learn_non_evidence,
                                transition_matrix, start_state_vid,
                                transition_matrix_copy)
     # If evidence then store the initial value in a tmp variable
@@ -70,7 +70,7 @@ def sample_and_sgd(var_samp, step, regularization, reg_param, truncation,
     # Sample the variable
     proposal = draw_sample(var_samp, var_copy, weight_copy, weight,
                            variable, factor, fmap, vmap,
-                           factor_index, Z, var_value, weight_value,
+                           factor_index, Z, var_value, weight_value, learn_non_evidence,
                            transition_matrix, start_state_vid,
                            transition_matrix_copy)
 
@@ -108,13 +108,13 @@ def sample_and_sgd(var_samp, step, regularization, reg_param, truncation,
         p0 = eval_factor(factor_id, var_samp,
                          evidence, var_copy,
                          variable, factor, fmap,
-                         var_value_evid,
+                         var_value_evid, learn_non_evidence,
                          transition_matrix, start_state_vid,
                          transition_matrix_copy)
         p1 = eval_factor(factor_id, var_samp,
                          proposal, var_copy,
                          variable, factor, fmap,
-                         var_value,
+                         var_value, learn_non_evidence,
                          transition_matrix, start_state_vid,
                          transition_matrix_copy)
         gradient = (p1 - p0) * factor[factor_id]["featureValue"]

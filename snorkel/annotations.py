@@ -10,6 +10,8 @@ from pandas import DataFrame, Series
 import scipy.sparse as sparse
 from sqlalchemy.sql import bindparam, select
 
+from collections import defaultdict
+
 from .features import get_span_feats
 from .models import (
     GoldLabel, GoldLabelKey, Label, LabelKey, Feature, FeatureKey, Candidate,
@@ -147,6 +149,34 @@ try:
                 d['Learned Acc.'] = est_accs
                 d['Learned Acc.'].index = lf_names
             return DataFrame(data=d, index=lf_names)[col_names]
+
+        def candidates_with_overlapping_lfs(self, session):
+            nnz_coords = list(zip(*self.nonzero()))
+            unique_x = set()
+            overlaps = defaultdict(list)
+            first_seen_idx = dict()
+
+            for i, coord in enumerate(nnz_coords):
+                if coord[0] in unique_x:
+                    overlaps[coord[0]].append(coord[1])
+                else:
+                    unique_x.add(coord[0])
+                    first_seen_idx[coord[0]] = i
+
+            for x_coord in overlaps:
+                first_occ = first_seen_idx[x_coord]
+                overlaps[x_coord].insert(0, nnz_coords[first_occ][1])
+
+            overlap_cands = []
+            lf_names = [self.get_key(session, j).name for j in range(self.shape[1])]
+
+            for cand_id, lf_ids in overlaps.iteritems():
+                cand = self.get_candidate(session, cand_id)
+                lfs = [lf_names[lf_id] for lf_id in lf_ids]
+                overlap_cands.append((cand_id, cand, lfs))
+
+            return sorted(overlap_cands)
+
 
 # This is a hack for getting the documentation to build...
 except:

@@ -90,7 +90,7 @@ class GenerativeModel(Classifier):
               decay=1.0, reg_param=0.1, reg_type=2, verbose=False, truncation=10,
               burn_in=5, cardinality=None, timer=None, candidate_ranges=None, threads=1,
               shuffle=True, seq_lengths=None, n_oracles=0,
-              latent_labels=None):
+              latent_labels=None, learn_non_evidence=True):
         """
         Fits the parameters of the model to a data set. By default, learns a
         conditionally independent model. Additional unary dependencies can be
@@ -255,7 +255,7 @@ class GenerativeModel(Classifier):
             truncation=truncation,
             quiet=(not verbose),
             verbose=verbose,
-            learn_non_evidence=True,
+            learn_non_evidence=learn_non_evidence,
             burn_in=burn_in,
             nthreads=threads
         )

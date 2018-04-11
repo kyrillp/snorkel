@@ -10,7 +10,7 @@ import math
 @jit(nopython=True, cache=False, nogil=True)
 def gibbsthread(shardID, nshards, var_copy, weight_copy, weight, variable,
                 factor, fmap, vmap, factor_index, Z, cstart,
-                count, var_value, weight_value, sample_evidence, burnin,
+                count, var_value, weight_value, sample_evidence, burnin, learn_non_evidence,
                 transition_matrix, start_state_vid, transition_matrix_copy):
     """TODO."""
     # Indentify start and end variable
@@ -25,7 +25,7 @@ def gibbsthread(shardID, nshards, var_copy, weight_copy, weight, variable,
         if variable[var_samp]["isEvidence"] == 0 or sample_evidence:
             v = draw_sample(var_samp, var_copy, weight_copy, weight, variable,
                             factor, fmap, vmap, factor_index, Z[shardID],
-                            var_value, weight_value,
+                            var_value, weight_value, learn_non_evidence,
                             transition_matrix, start_state_vid,
                             transition_matrix_copy)
             var_value[var_copy][var_samp] = v
@@ -38,7 +38,7 @@ def gibbsthread(shardID, nshards, var_copy, weight_copy, weight, variable,
 
 @jit(nopython=True, cache=False, nogil=True)
 def draw_sample(var_samp, var_copy, weight_copy, weight, variable, factor,
-                fmap, vmap, factor_index, Z, var_value, weight_value,
+                fmap, vmap, factor_index, Z, var_value, weight_value, learn_non_evidence,
                 transition_matrix, start_state_vid, transition_matrix_copy):
     """TODO."""
     cardinality = variable[var_samp]["cardinality"]
@@ -46,8 +46,8 @@ def draw_sample(var_samp, var_copy, weight_copy, weight, variable, factor,
         Z[value] = np.exp(potential(var_samp, value, var_copy, weight_copy,
                                     weight, variable, factor, fmap,
                                     vmap, factor_index, var_value,
-                                    weight_value, transition_matrix, start_state_vid,
-                                    transition_matrix_copy))
+                                    weight_value, learn_non_evidence,
+                                    transition_matrix, start_state_vid, transition_matrix_copy))
 
     for j in range(1, cardinality):
         Z[j] += Z[j - 1]
@@ -59,7 +59,7 @@ def draw_sample(var_samp, var_copy, weight_copy, weight, variable, factor,
 
 @jit(nopython=True, cache=False, nogil=True)
 def potential(var_samp, value, var_copy, weight_copy, weight, variable, factor,
-              fmap, vmap, factor_index, var_value, weight_value,
+              fmap, vmap, factor_index, var_value, weight_value, learn_non_evidence,
               transition_matrix, start_state_vid, transition_matrix_copy):
     """TODO."""
     p = 0.0
@@ -73,8 +73,8 @@ def potential(var_samp, value, var_copy, weight_copy, weight, variable, factor,
         factor_id = factor_index[k]
         p += weight_value[weight_copy][factor[factor_id]["weightId"]] * \
             eval_factor(factor_id, var_samp, value, var_copy, variable,
-                        factor, fmap, var_value, transition_matrix, start_state_vid,
-                        transition_matrix_copy)
+                        factor, fmap, var_value, learn_non_evidence,
+                        transition_matrix, start_state_vid, transition_matrix_copy)
     return p
 
 
@@ -157,7 +157,8 @@ for (key, value) in FACTORS.items():
 
 @jit(nopython=True, cache=False, nogil=True)
 def eval_factor(factor_id, var_samp, value, var_copy, variable, factor, fmap,
-                var_value, transition_matrix, start_state_vid, transition_matrix_copy):
+                var_value, learn_non_evidence,
+                transition_matrix, start_state_vid, transition_matrix_copy):
     """TODO."""
     ####################
     # BINARY VARIABLES #
@@ -418,7 +419,12 @@ def eval_factor(factor_id, var_samp, value, var_copy, variable, factor, fmap,
 
         # y_prev_index is actual class at time t - 1 if Y_t-1 is not the start state
         # access, update and return sequential occurrence mapping
-        transition_matrix[transition_matrix_copy][y_prev_index][y_curr_index] += 1
+        if learn_non_evidence:
+            transition_matrix[transition_matrix_copy][y_prev_index][y_curr_index] += 1
+        else:
+            if variable[var_samp]["isEvidence"] == 1:
+                transition_matrix[transition_matrix_copy][y_prev_index][y_curr_index] += 1
+
         return transition_matrix[transition_matrix_copy][y_prev_index][y_curr_index]
 
     ###########################################
