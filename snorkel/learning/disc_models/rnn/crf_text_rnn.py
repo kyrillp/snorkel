@@ -396,8 +396,11 @@ class CRFTextRNN(RNNBase):
         ids_to_words = self.word_dict.reverse()
         # with open(out_path, 'w') as out:
 
+        preds_final = []
+
         for sent_pred, sent_gold, sent in zip(predictions, Y_test, X_test):
             pred_err = 0
+            preds_final_sent = []
 
             for tag_pred, tag_gold, token in zip(sent_pred, sent_gold, sent):
                 token_num += 1
@@ -422,15 +425,18 @@ class CRFTextRNN(RNNBase):
                     print('PREDICTION ({}) / CARDINALITY MISMATCH ({})'
                           .format(tag_pred, self.cardinality))
 
-                    # word = ids_to_words.get(token, None)
-                    # if ids_to_classes is not None:
-                    #     # In Snorkel, class IDs have to start at 1 because 0 is the reserved value for abstaining
-                    #     # labeling functions. There is no abstention in TensorFlow, i.e. classes have to be zero-indexed.
-                    #     class_pred = ids_to_classes.get(tag_pred + 1, None)
-                    #     class_gold = ids_to_classes.get(tag_gold + 1, None)
-                    # else:
-                    #     class_pred = tag_pred
-                    #     class_gold = tag_gold
+                else:
+                    word = ids_to_words.get(token, None)
+                    if ids_to_classes is not None:
+                        # In Snorkel, class IDs have to start at 1 because 0 is the reserved value for abstaining
+                        # labeling functions. There is no abstention in TensorFlow, i.e. classes have to be zero-indexed.
+                        class_pred = ids_to_classes.get(tag_pred + 1, None)
+                        # class_gold = ids_to_classes.get(tag_gold + 1, None)
+                    else:
+                        class_pred = tag_pred
+                        # class_gold = tag_gold
+
+                    preds_final_sent.append((word, class_pred))
 
                     # out.write('{}\t{}\t{}'.format(word, class_pred, class_gold))
                     # out.write('\n')
@@ -441,6 +447,8 @@ class CRFTextRNN(RNNBase):
 
                 # out.write('\n')
 
+            preds_final.append(preds_final_sent)
+
         if other_total == 0:
             other_total = 1
         if class_total == 0:
@@ -448,7 +456,8 @@ class CRFTextRNN(RNNBase):
 
         return float(correct) / token_num, \
             float(token_err) / token_num, float(sent_err) / sent_num, \
-            float(other_as_class) / other_total, float(class_as_other) / class_total
+            float(other_as_class) / other_total, float(class_as_other) / class_total, \
+            preds_final
 
     def train(self, X_train, Y_train, dev_labels=None, X_dev=None, max_sentence_length=None,
               shuffle=False, max_word_length=None, **kwargs):
