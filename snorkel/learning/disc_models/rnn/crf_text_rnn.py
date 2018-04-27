@@ -139,8 +139,10 @@ class CRFTextRNN(RNNBase):
         # inputs = tf.concat([inputs, char_rep], axis=-1)
 
         # Add dropout layer
-        self.keep_prob = tf.placeholder(tf.float32)
-        inputs_dropout = tf.nn.dropout(inputs, self.keep_prob, seed=s3)
+        # self.keep_prob = tf.placeholder(tf.float32)
+        # inputs_dropout = tf.nn.dropout(inputs, self.keep_prob, seed=s3)
+        self.in_keep_prob = tf.placeholder(tf.float32)
+        inputs_dropout = tf.nn.dropout(inputs, self.in_keep_prob, seed=s3)
 
         # Build RNN graph
         batch_size = tf.shape(self.sentences)[0]
@@ -178,7 +180,9 @@ class CRFTextRNN(RNNBase):
             rnn_out, dim, self.sentence_lengths)
 
         # Add dropout layer
-        potentials_dropout = tf.nn.dropout(potentials, self.keep_prob, seed=s3)
+        # potentials_dropout = tf.nn.dropout(potentials, self.keep_prob, seed=s3)
+        self.out_keep_prob = tf.placeholder(tf.float32)
+        potentials_dropout = tf.nn.dropout(potentials, self.out_keep_prob, seed=s3)
 
         # Build activation layer
         self.Y = tf.placeholder(tf.float32, [None, None, self.cardinality])
@@ -225,14 +229,16 @@ class CRFTextRNN(RNNBase):
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
 
     def _construct_feed_dict(self, X_b, Y_b, lr=0.01, dropout=None, train_labels=None,
-                             chars=None, **kwargs):
+                             chars=None, dropout_in=None, dropout_out=None, **kwargs):
         X_b, len_b, Y_b, L_b, C_b, len_c = self._make_tensor(X_b, Y_b, train_labels, chars)
 
         return {
             self.sentences:        X_b,
             self.sentence_lengths: len_b,
             self.Y:                Y_b,
-            self.keep_prob:        dropout or 1.0,
+            # self.keep_prob:        dropout or 1.0,
+            self.in_keep_prob:     dropout_in or 1.0,
+            self.out_keep_prob:    dropout_out or 1.0,
             self.lr:               lr,
             self.train_labels:     L_b,
             self.words:            C_b,
@@ -328,7 +334,9 @@ class CRFTextRNN(RNNBase):
         pred = self.session.run(self.pred, {
             self.sentences:        x,
             self.sentence_lengths: x_len,
-            self.keep_prob:        1.0,
+            # self.keep_prob:        1.0,
+            self.in_keep_prob:     1.0,
+            self.out_keep_prob:    1.0,
             self.words:            _words,
             self.word_lengths:     _words_len
         })

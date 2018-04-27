@@ -89,7 +89,8 @@ class GenerativeModel(Classifier):
               init_deps=0.0, init_class_prior=-1.0, epochs=30, step_size=None,
               decay=1.0, reg_param=0.1, reg_type=2, verbose=False, truncation=10,
               burn_in=5, cardinality=None, timer=None, candidate_ranges=None, threads=1,
-              shuffle=True, seq_lengths=None):
+              shuffle=True, seq_lengths=None, n_oracles=0,
+              latent_labels=None, learn_non_evidence=True):
         """
         Fits the parameters of the model to a data set. By default, learns a
         conditionally independent model. Additional unary dependencies can be
@@ -189,8 +190,18 @@ class GenerativeModel(Classifier):
         else:
             LF_acc_prior_weights = list(copy(LF_acc_prior_weights))
 
-        # LF weights are un-fixed
-        is_fixed = [False for _ in range(n)]
+        if n_oracles == 0:
+            # LF weights are un-fixed
+            is_fixed = [False for _ in range(n)]
+
+        elif n_oracles > 0:
+            # is_fixed = [True for _ in range(n_oracles)] + [False for _ in range(n - n_oracles)]
+            is_fixed = [False for _ in range(n)]
+            for i in range(n_oracles):
+                LF_acc_prior_weights[i] = label_prior_weight
+
+        else:
+            raise ValueError("There can't be a negative amount of oracle LFs")
 
         # If supervised labels are provided, add them as a fixed LF with prior
         # Note: For large L this column stack operation could be very
@@ -232,7 +243,8 @@ class GenerativeModel(Classifier):
         self._process_dependency_graph(L, deps)
         weight, variable, factor, ftv, domain_mask, n_edges, transition_matrix, start_state_vid = \
             self._compile(L, init_deps, init_class_prior,
-                          LF_acc_prior_weights, is_fixed, self.cardinalities)
+                          LF_acc_prior_weights, is_fixed, self.cardinalities,
+                          latent_labels)
         fg = NumbSkull(
             n_inference_epoch=0,
             n_learning_epoch=epochs,
@@ -243,7 +255,7 @@ class GenerativeModel(Classifier):
             truncation=truncation,
             quiet=(not verbose),
             verbose=verbose,
-            learn_non_evidence=True,
+            learn_non_evidence=learn_non_evidence,
             burn_in=burn_in,
             nthreads=threads
         )
@@ -532,7 +544,8 @@ class GenerativeModel(Classifier):
         for dep_name in GenerativeModel.dep_names:
             setattr(self, dep_name, getattr(self, dep_name).tocoo(copy=True))
 
-    def _compile(self, L, init_deps, init_class_prior, LF_acc_prior_weights, is_fixed, cardinalities):
+    def _compile(self, L, init_deps, init_class_prior, LF_acc_prior_weights, is_fixed,
+                 cardinalities, latent_labels=None):
         """Compiles a generative model based on L and the current labeling function
         dependencies.
         """
@@ -627,11 +640,27 @@ class GenerativeModel(Classifier):
         #   Labeling functions: 0 to (cardinality - 1) are the classes
         #                       cardinality is abstain
         # Candidates (variables)
-        for i in range(m):
-            variable[i]['isEvidence'] = False
-            variable[i]['initialValue'] = self.rng.randint(cardinalities[i])
-            variable[i]["dataType"] = 0
-            variable[i]["cardinality"] = cardinalities[i]
+        if latent_labels is None:
+            for i in range(m):
+                variable[i]['isEvidence'] = False
+                variable[i]['initialValue'] = self.rng.randint(cardinalities[i])
+                variable[i]["dataType"] = 0
+                variable[i]["cardinality"] = cardinalities[i]
+
+        else:
+            assert(m == len(latent_labels))
+            print('Setting token annotations as evidence for class variables')
+
+            for i in range(m):
+                variable[i]["dataType"] = 0
+                variable[i]["cardinality"] = cardinalities[i]
+
+                if latent_labels[i]:
+                    variable[i]['isEvidence'] = True
+                    variable[i]['initialValue'] = latent_labels[i] - 1
+                else:
+                    variable[i]['isEvidence'] = False
+                    variable[i]['initialValue'] = self.rng.randint(cardinalities[i])
 
         # LF label variables -- initial loop to set all variables
         for i in range(m):

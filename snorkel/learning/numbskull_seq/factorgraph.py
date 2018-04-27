@@ -136,7 +136,7 @@ class FactorGraph(object):
     ################################
 
     def burnIn(self, epochs, sample_evidence, diagnostics=False,
-               var_copy=0, weight_copy=0, transition_matrix_copy=0):
+               var_copy=0, weight_copy=0, transition_matrix_copy=0, learn_non_evidence=True):
         """TODO."""
         if diagnostics:
             print("FACTOR " + str(self.fid) + ": STARTED BURN-IN...")
@@ -146,14 +146,14 @@ class FactorGraph(object):
                     self.weight, self.variable, self.factor,
                     self.fmap, self.vmap,
                     self.factor_index, self.Z, self.cstart, self.count,
-                    self.var_value, self.weight_value, sample_evidence, True,
+                    self.var_value, self.weight_value, sample_evidence, True, learn_non_evidence,
                     self.transition_matrix, self.start_state_vid,
                     transition_matrix_copy)
             run_pool(self.threadpool, self.threads, gibbsthread, args)
         if diagnostics:
             print("FACTOR " + str(self.fid) + ": DONE WITH BURN-IN")
 
-    def inference(self, burnin_epochs, epochs, sample_evidence=False,
+    def inference(self, burnin_epochs, epochs, sample_evidence=False, learn_non_evidence=False,
                   diagnostics=False, var_copy=0, weight_copy=0, transition_matrix_copy=0):
         """TODO."""
         # Burn-in
@@ -170,7 +170,7 @@ class FactorGraph(object):
                         self.variable, self.factor, self.fmap,
                         self.vmap, self.factor_index, self.Z,
                         self.cstart, self.count, self.var_value,
-                        self.weight_value, sample_evidence, False,
+                        self.weight_value, sample_evidence, False, learn_non_evidence,
                         self.transition_matrix, self.start_state_vid,
                         transition_matrix_copy)
                 run_pool(self.threadpool, self.threads, gibbsthread, args)
