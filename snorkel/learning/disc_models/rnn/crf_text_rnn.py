@@ -28,7 +28,7 @@ class CRFTextRNN(RNNBase):
             self.char_dict = SymbolTable()
 
         max_word_len = 0
-        data, ends, sent_buf, words, word_buf = [], [], [], [], []
+        data, ends, sent_buf, words, word_buf, sents = [], [], [], [], [], []
         for candidate in candidates:
             tok = candidate.get_contexts()[1].text
             index = candidate.get_contexts()[2].text
@@ -36,6 +36,7 @@ class CRFTextRNN(RNNBase):
             if sent_buf and index == '0':
                 f = self.word_dict.get if extend else self.word_dict.lookup
                 data.append(np.array(map(f, sent_buf)))
+                sents.append(sent_buf)
                 ends.append(len(sent_buf))
                 sent_buf = []
 
@@ -70,6 +71,7 @@ class CRFTextRNN(RNNBase):
             indexes = np.arange(len(data))
             np.random.shuffle(indexes)
             data = np.array(data)[indexes]
+            sents = np.array(sents)[indexes]
             ends = np.array(ends)[indexes]
             if marginals is not None:
                 marg = marg[indexes]
@@ -80,7 +82,7 @@ class CRFTextRNN(RNNBase):
             print('Shuffled data for LSTM')
 
         words = words if len(words) > 0 else None
-        return data, ends, marg, aligned_dev_labels, words, max_word_len
+        return data, ends, marg, aligned_dev_labels, words, max_word_len, sents
 
     def _build_model(self, dim=50, dim_char=50, attn_window=None, max_len=20,
                      cell_type=tf.contrib.rnn.BasicLSTMCell, max_word_len=10,
@@ -323,7 +325,7 @@ class CRFTextRNN(RNNBase):
     def predictions(self, X, b=0.5, batch_size=None, words=None):
 
         if isinstance(X[0], Candidate):
-            X_test, ends, _, _, pwords, _ = self._preprocess_data(X, extend=False)
+            X_test, ends, _, _, pwords, _, _ = self._preprocess_data(X, extend=False)
             words = pwords if words is not None else None
             self._check_max_sentence_length(ends)
         else:
@@ -372,7 +374,7 @@ class CRFTextRNN(RNNBase):
         # correct = np.where([predictions == Y_test])[0].shape[0]
         # return correct / float(Y_test.shape[0])
 
-        X_test, ends, _, _, words, _ = self._preprocess_data(X_test, extend=False)
+        X_test, ends, _, _, words, _, sents = self._preprocess_data(X_test, extend=False)
         self._check_max_sentence_length(ends)
 
         words = words if use_chars else None
@@ -406,7 +408,8 @@ class CRFTextRNN(RNNBase):
 
         preds_final = []
 
-        for sent_pred, sent_gold, sent in zip(predictions, Y_test, X_test):
+        for sent_pred, sent_gold, sent in zip(predictions, Y_test, sents):
+            # for sent_pred, sent_gold, sent in zip(predictions, Y_test, X_test):
             pred_err = 0
             preds_final_sent = []
 
@@ -434,7 +437,8 @@ class CRFTextRNN(RNNBase):
                           .format(tag_pred, self.cardinality))
 
                 else:
-                    word = ids_to_words.get(token, None)
+                    # word = ids_to_words.get(token, None)
+                    word = token
                     if ids_to_classes is not None:
                         # In Snorkel, class IDs have to start at 1 because 0 is the reserved value for abstaining
                         # labeling functions. There is no abstention in TensorFlow, i.e. classes have to be zero-indexed.
@@ -474,10 +478,10 @@ class CRFTextRNN(RNNBase):
         train.
         """
         # Text preprocessing
-        X_train, ends, Y_train, train_labels, train_words, max_word_len = self._preprocess_data(
+        X_train, ends, Y_train, train_labels, train_words, max_word_len, _ = self._preprocess_data(
             X_train, Y_train, dev_labels=dev_labels, extend=True, shuffle_data=shuffle)
         if X_dev is not None:
-            X_dev, _, _, _, _, _ = self._preprocess_data(X_dev, [], extend=False)
+            X_dev, _, _, _, _, _, _ = self._preprocess_data(X_dev, [], extend=False)
 
         # Get max sentence size
         max_len = max_sentence_length or max(len(x) for x in X_train)
